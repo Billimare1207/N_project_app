@@ -1,11 +1,11 @@
 # app.py
 import json
-from datetime import date, datetime
 import uuid
+from datetime import date, datetime
 import streamlit as st
 
 # =========================
-# Config & simple styling
+# Config & styling
 # =========================
 st.set_page_config(page_title="Metabolic Care Demo", page_icon="💊", layout="centered")
 
@@ -30,6 +30,15 @@ st.markdown(f"""
   .small {{ font-size:12px; color:#6b7280; }}
 </style>
 """, unsafe_allow_html=True)
+
+# =========================
+# Compatibility shim for rerun
+# =========================
+def _rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
 
 # =========================
 # Session init
@@ -69,11 +78,11 @@ def progress():
 
 def next_step():
     st.session_state.step += 1
-    st.experimental_rerun()
+    _rerun()
 
 def prev_step():
     st.session_state.step = max(0, st.session_state.step - 1)
-    st.experimental_rerun()
+    _rerun()
 
 def calc_bmi(h_cm, w_kg):
     try:
@@ -149,7 +158,7 @@ def render_eligibility():
 
         submit = st.form_submit_button("Continue →")
         if submit:
-            bmi_ok = (bmi is not None) and (bmi >= 27)  # demo threshold
+            bmi_ok = (bmi is not None) and (bmi >= 27)  # demo threshold only
             st.session_state.form["metrics"].update({"height_cm": h, "weight_kg": w, "bmi": bmi})
             st.session_state.form["eligibility"].update({"age_ok": age_ok, "bmi_ok": bmi_ok, "contra": contra, "pregnant": preg})
             next_step()
@@ -163,7 +172,8 @@ def render_medical():
     st.markdown("### Medical Questionnaire")
     with st.form("med_form", clear_on_submit=False):
         conditions = st.multiselect("Conditions (demo)", ["Hypertension","Diabetes","High cholesterol","Depression","None"])
-        meds = st.tags_input("Current medications (type to add)") if hasattr(st, "tags_input") else st.text_input("Current medications (comma-separated)")
+        # tags_input is not available in all builds; keep a graceful fallback.
+        meds = st.text_input("Current medications (comma-separated)")
         allergies = st.multiselect("Allergies", ["Penicillin","Sulfa","Peanuts","Latex","None"])
         notes = st.text_area("Anything else your clinician should know? (demo)")
 
@@ -173,7 +183,7 @@ def render_medical():
             if not agree:
                 st.error("You must acknowledge clinician review to continue.")
             else:
-                meds_list = meds if isinstance(meds, list) else [m.strip() for m in meds.split(",") if m.strip()]
+                meds_list = [m.strip() for m in meds.split(",") if m.strip()]
                 st.session_state.form["medical"].update({
                     "conditions": conditions, "meds": meds_list, "allergies": allergies, "notes": notes
                 })
@@ -185,8 +195,8 @@ def render_medical():
 # Step 3: Plan & Pricing
 # =========================
 PLANS = [
-    {"id": "starter", "name": "Starter", "price": 199, "desc": "Initial eval + care plan"},
-    {"id": "plus", "name": "Plus", "price": 299, "desc": "Eval + clinician messaging + monthly check-ins"},
+    {"id": "starter",  "name": "Starter",  "price": 199, "desc": "Initial eval + care plan"},
+    {"id": "plus",     "name": "Plus",     "price": 299, "desc": "Eval + clinician messaging + monthly check-ins"},
     {"id": "complete", "name": "Complete", "price": 399, "desc": "All of the above + priority support"},
 ]
 
@@ -251,18 +261,25 @@ def render_checkout():
 def render_confirmation():
     st.markdown("### 🎉 Submission received")
     st.caption("A licensed clinician will review your information (demo).")
+
     data = st.session_state.form.copy()
-    # Serialize date for JSON
+    # serialize date of birth for JSON
     if isinstance(data["profile"]["dob"], date):
         data["profile"]["dob"] = data["profile"]["dob"].isoformat()
     st.json(data)
 
-    st.download_button("⬇️ Download submission JSON", data=json.dumps(data, indent=2),
-                       file_name=f"submission_{st.session_state.lead_id}.json",
-                       mime="application/json")
+    st.download_button(
+        "⬇️ Download submission JSON",
+        data=json.dumps(data, indent=2),
+        file_name=f"submission_{st.session_state.lead_id}.json",
+        mime="application/json"
+    )
+
     st.markdown("<div class='note'>This is a demo UI. No diagnosis or treatment is provided.</div>", unsafe_allow_html=True)
 
-    st.button("← Back to start", on_click=lambda: (st.session_state.update(step=0), st.experimental_rerun()))
+    if st.button("← Back to start"):
+        st.session_state.step = 0
+        _rerun()
 
 # =========================
 # Optional webhooks / analytics (pseudo)
@@ -276,12 +293,11 @@ def send_to_webhook(payload: dict):
     pass
 
 # =========================
-# Render header + progress
+# Header + progress + router
 # =========================
 st.markdown(" ".join([f'<span class="pill">{i+1}. {name}</span>' for i, name in enumerate(STEPS)]), unsafe_allow_html=True)
 progress()
 
-# Router
 step = st.session_state.step
 if   step == 0: render_landing()
 elif step == 1: render_eligibility()
@@ -291,4 +307,4 @@ elif step == 4: render_checkout()
 elif step == 5: render_confirmation()
 else:
     st.session_state.step = 0
-    st.experimental_rerun()
+    _rerun()
